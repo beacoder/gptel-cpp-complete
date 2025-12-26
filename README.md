@@ -1,6 +1,6 @@
 # gptel-cpp-complete
 
-`gptel-cpp-complete` is an experimental Emacs package that provides
+`gptel-cpp-complete` is an experimental package that provides
 **Copilot-style, context-aware C++ code completion** using:
 
 - **eglot + clangd** for authoritative semantic information
@@ -56,13 +56,5 @@ Manual
 
 Clone the repository and add it to your load path:
 
-(add-to-list 'load-path "/path/to/cpp-ai-complete")
-(require 'cpp-ai-complete)
-
-Enable for C++
-(add-hook 'c++-mode-hook #'cpp-ai-complete-mode)
-
-
-Or enable per-buffer:
-
-M-x cpp-ai-complete-mode
+(add-to-list 'load-path "/path/to/gptel-cpp-complete")
+(require 'gptel-cpp-complete)
