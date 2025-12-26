@@ -1,0 +1,251 @@
+;;; init-gptel-completion.el --- GPTel-powered C++ completion -*- lexical-binding: t -*-
+
+;;; Commentary:
+;; C++ code completion using eglot + gptel + ag
+
+;;; Code:
+
+;; ------------------------------------------------------------
+;; Configuration
+;; ------------------------------------------------------------
+(setq eglot-extend-to-xref t)
+
+(defgroup gptel-cpp-complete nil
+  "GPTel-based C++ code completion."
+  :group 'tools)
+
+(defcustom gptel-cpp-complete-idle-delay 0.25
+  "Idle time before regenerating GPTel completion."
+  :type 'number
+  :group 'gptel-cpp-complete)
+
+;; ------------------------------------------------------------
+;; Context Extraction
+;; ------------------------------------------------------------
+(defun gptel-cpp-complete--cpp-current-function ()
+  "Return current C++ function definition as string."
+  (when (treesit-ready-p 'cpp)
+    (save-excursion
+      (ignore-errors
+        (treesit-beginning-of-defun)
+        (let ((beg (point)))
+          (treesit-end-of-defun)
+          (buffer-substring-no-properties beg (point)))))))
+
+(defun my/eglot--in-scope-symbols+kind ()
+  "Return list of local symbols from Eglot."
+  (when-let* ((server (eglot--current-server-or-lose))
+              (pos (eglot--pos-to-lsp-position (point)))
+              (params `(:textDocument (:uri ,(eglot--path-to-uri (buffer-file-name)))
+                                      :position ,pos
+                                      :context (:triggerKind 1)))
+              (completion (jsonrpc-request server
+                                           :textDocument/completion
+                                           params)))
+    (let ((items (cond
+                  ((vectorp completion) completion)
+                  ((plist-get completion :items))
+                  (t nil))))
+      (mapcar (lambda (item)
+                (cons
+                 (plist-get item :label)
+                 (list :label (plist-get item :label)
+                       :kind  (plist-get item :kind))))
+              items))))
+
+(defun gptel-cpp-complete--classify-symbols (symbols)
+  "Classify SYMBOLS into different kind."
+  (cl-loop for s in symbols
+           if (memq (plist-get s :kind) '(2 3 4)) collect s into funcs
+           else if (memq (plist-get s :kind) '(6 21)) collect s into vars
+           else if (memq (plist-get s :kind) '(5 10 20)) collect s into members
+           finally return `(:funcs ,funcs :vars ,vars :members ,members)))
+
+(defun gptel-cpp-complete--safe-subseq (seq start end)
+  "Safely extracts a subseq from SEQ starting at START index up to END (not included)."
+  (when seq
+    (cl-subseq seq start (min end (length seq)))))
+
+(defun gptel-cpp-complete--select-search-symbols (classified)
+  "Select symbols to search based on CLASSIFIED."
+  (append
+   (gptel-cpp-complete--safe-subseq (plist-get classified :funcs) 0 2)
+   (gptel-cpp-complete--safe-subseq (plist-get classified :members) 0 1)))
+
+(defun gptel-cpp-complete--ag-pattern-for-symbol (symbol)
+  "Format SYMBOL for searching with ag."
+  (let ((name (plist-get symbol :label)))
+    (cond
+     ((memq (plist-get symbol :kind) '(2 3 4))
+      (when (string-match "\\b\\([A-Za-z_][A-Za-z0-9_]*\\)\\s-*(" name)
+        (setq name (match-string 1 name)))
+      (format "%s\\s*\\(" name))
+     ((memq (plist-get symbol :kind) '(5 10 20))
+      (format "(\\.|->)%s\\b" name))
+     (t name))))
+
+(defun gptel-cpp-complete--ag-search-pattern (pattern)
+  "Search PATTERN using ag."
+  (shell-command-to-string
+   (format "ag --cpp --nobreak --noheading -C 3 \"%s\" | head -n 30"
+           pattern)))
+
+(defun gptel-cpp-complete--ag-similar-patterns (s-k)
+  "Search similar patterns based on S-K."
+  (let* ((symbols s-k)
+         (classified (gptel-cpp-complete--classify-symbols symbols))
+         (targets (gptel-cpp-complete--select-search-symbols classified)))
+    (string-join
+     (cl-loop for sym in targets
+              for pat = (gptel-cpp-complete--ag-pattern-for-symbol sym)
+              collect (gptel-cpp-complete--ag-search-pattern pat))
+     "\n\n")))
+
+;; ------------------------------------------------------------
+;; Prompt Construction
+;; ------------------------------------------------------------
+(defconst gptel-cpp-complete--system-prompt
+  "You are an expert C++ language-server–style code completion engine.
+
+You are operating inside a very large, existing C++ codebase.
+
+Your task:
+- Continue or complete the code at the cursor position
+- Produce code that would compile in this codebase
+
+You are given:
+- The current function body
+- The list of in-scope symbols (authoritative)
+- Examples of similar patterns retrieved from this repository
+
+Hard rules (must follow):
+- Use ONLY the provided in-scope symbols and patterns
+- Do NOT invent new functions, types, macros, or headers
+- Do NOT change existing code outside the completion
+- Respect C++ syntax, constness, references, and ownership
+- Match formatting, indentation, and naming style
+- Prefer existing helper functions and idioms
+- If unsure, produce the smallest reasonable completion
+
+Output rules:
+- Output ONLY the code to be inserted
+- Do NOT include explanations, comments, or markdown
+- Do NOT repeat existing code unless necessary for completion"
+  "Completion system prompt.")
+
+(defconst gptel-cpp-complete--completion-prompt
+  "Current function:
+```cpp
+%s
+```
+In-scope symbols:
+%s
+
+Similar patterns in this repository:
+%s"
+  "Completion user prompt.")
+
+(defun gptel-cpp-complete--build-prompt ()
+  "Assemble GPTel completion prompt."
+  (let* ((func (or (gptel-cpp-complete--cpp-current-function) "N/A"))
+         (symbols+kind (or (my/eglot--in-scope-symbols+kind) '()))
+         (symbols (or (delete-dups (mapcar #'car symbols+kind)) '()))
+         (s+k (or (mapcar #'cdr symbols+kind) '()))
+         (patterns (or (gptel-cpp-complete--ag-similar-patterns s+k) "None found")))
+    (format gptel-cpp-complete--completion-prompt
+            func
+            (string-join symbols ", ")
+            patterns)))
+
+;; ------------------------------------------------------------
+;; Overlay Management
+;; ------------------------------------------------------------
+(defvar gptel-cpp-complete--overlay nil
+  "Overlay used to display GPTel completions.")
+
+(defun gptel-cpp-complete--clear-overlay ()
+  "Remove GPTel completion overlay."
+  (when (overlayp gptel-cpp-complete--overlay)
+    (delete-overlay gptel-cpp-complete--overlay))
+  (setq gptel-cpp-complete--overlay nil))
+
+(defun gptel-cpp-complete--overlay-active-p ()
+  "Return non-nil if GPTel overlay is active."
+  (overlayp gptel-cpp-complete--overlay))
+
+(defun gptel-cpp-complete--show-overlay (text)
+  "Show TEXT as ghost completion at point."
+  (gptel-cpp-complete--clear-overlay)
+  (setq gptel-cpp-complete--overlay (make-overlay (point) (point)))
+  (overlay-put gptel-cpp-complete--overlay
+               'after-string
+               (propertize text 'face 'shadow)))
+
+(defun gptel-cpp-complete--accept-overlay ()
+  "Insert overlay text into buffer."
+  (when (gptel-cpp-complete--overlay-active-p)
+    (let ((text (overlay-get gptel-cpp-complete--overlay 'after-string)))
+      (gptel-cpp-complete--clear-overlay)
+      (insert text))))
+
+;; ------------------------------------------------------------
+;; GPTel Interaction
+;; ------------------------------------------------------------
+(defvar gptel-cpp-complete--regenerate-timer nil
+  "Idle timer for GPTel regeneration.")
+
+(defun gptel-cpp-complete--handle-response (response _info)
+  "Display GPTel RESPONSE."
+  (when (and response (stringp response))
+    (message "")
+    (gptel-cpp-complete--show-overlay response)))
+
+;;;###autoload
+(defun gptel-cpp-complete ()
+  "Request GPTel code completion."
+  (interactive)
+  (message "Generating completion...")
+  (gptel-request
+      (gptel-cpp-complete--build-prompt)
+    :system gptel-cpp-complete--system-prompt
+    :callback #'gptel-cpp-complete--handle-response))
+
+(defun gptel-cpp-complete--schedule-regenerate ()
+  "Schedule GPTel completion after idle delay."
+  (when gptel-cpp-complete--regenerate-timer
+    (cancel-timer gptel-cpp-complete--regenerate-timer))
+  (setq gptel-cpp-complete--regenerate-timer
+        (run-with-idle-timer
+         gptel-cpp-complete-idle-delay nil
+         #'gptel-cpp-complete)))
+
+;; ------------------------------------------------------------
+;; Input Handling
+;; ------------------------------------------------------------
+(defun gptel-cpp-complete--self-insert-p ()
+  "Return non-nil if command was self insert."
+  (eq this-command 'self-insert-command))
+
+(defun gptel-cpp-complete--last-command-was-ret-p ()
+  "Return non-nil if last command was RET/RETURN."
+  (memq last-command-event '(?\r return)))
+
+(defun gptel-cpp-complete--post-command ()
+  "Post-command hook driving GPTel completion."
+  (when (derived-mode-p 'c++-mode)
+    (cond
+     ((gptel-cpp-complete--last-command-was-ret-p)
+      (when (gptel-cpp-complete--overlay-active-p)
+        (delete-char -1))
+      (gptel-cpp-complete--accept-overlay))
+     ((gptel-cpp-complete--self-insert-p)
+      (gptel-cpp-complete--clear-overlay)
+      (gptel-cpp-complete--schedule-regenerate))
+     (t
+      (gptel-cpp-complete--clear-overlay)))))
+
+(add-hook 'post-command-hook #'gptel-cpp-complete--post-command)
+
+
+(provide 'init-gptel-completion)
+;;; init-gptel-completion.el ends here
