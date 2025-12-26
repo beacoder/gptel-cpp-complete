@@ -50,6 +50,9 @@ Recommended `clangd` invocation:
 
 ```bash
 clangd --background-index --clang-tidy
+```
+
+---
 
 ## Installation
 Manual
