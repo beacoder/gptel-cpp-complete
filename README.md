@@ -17,12 +17,13 @@ Its sole purpose is **accurate, minimal, inline code continuation**.
 ## Features
 
 - Context-aware C++ code completion inside functions
-- Uses *real* in-scope symbols from `clangd` (via LSP completion)
+- Uses *real* in-scope symbols from `clangd` (via eglot)
 - Retrieves similar usage patterns from your repository with `ag`
+- Uses *real* call-hierarchy data from `clangd` (via eglot)
 - Strict system prompt to avoid hallucinated APIs
 - Inline “ghost text” suggestions
 - Regenerates completion as you type (except when accepting with RET)
-- Fully local-LLM friendly (no cloud dependency required)
+- Support both local and remote LLM with `gptel'
 
 ---
 
