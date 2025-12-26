@@ -28,7 +28,7 @@ Its sole purpose is **accurate, minimal, inline code continuation**.
 
 ## Requirements
 
-- Emacs 28+ (Emacs 29+ recommended)
+- Emacs 29+
 - [`eglot`](https://elpa.gnu.org/packages/eglot.html)
 - [`gptel`](https://github.com/karthink/gptel)
 - [`ag`](https://github.com/ggreer/the_silver_searcher)
