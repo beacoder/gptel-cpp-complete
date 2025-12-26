@@ -7,7 +7,7 @@
 ;; Version: 0.0.1
 ;; Created: 2025-12-26
 ;; Keywords: programming, convenience
-;; Package-Requires: ((emacs "29.1") (eglot "1.19"))
+;; Package-Requires: ((emacs "29.1") (eglot "1.19") (gptel "0.9.8"))
 
 ;; This file is not part of GNU Emacs.
 
@@ -31,7 +31,8 @@
 ;;; Code:
 
 (require 'eglot)
-(require 'gptel-request)
+(require 'gptel)
+(require 'treesit)
 
 ;; ------------------------------------------------------------
 ;; Configuration
