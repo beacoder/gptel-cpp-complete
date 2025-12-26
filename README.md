@@ -55,7 +55,6 @@ clangd --background-index --clang-tidy
 ---
 
 ## Installation
-Manual
 
 Clone the repository and add it to your load path:
 
