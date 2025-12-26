@@ -10,6 +10,7 @@
 
 Unlike generic AI assistants, this package is designed to behave like a
 **language-server–style completion engine**, not a chat bot.
+Its sole purpose is **accurate, minimal, inline code continuation**.
 
 ---
 
@@ -22,19 +23,6 @@ Unlike generic AI assistants, this package is designed to behave like a
 - Inline “ghost text” suggestions
 - Regenerates completion as you type (except when accepting with RET)
 - Fully local-LLM friendly (no cloud dependency required)
-
----
-
-## Non-goals
-
-This package intentionally does **not** try to:
-
-- Replace `company-mode` or standard LSP completion
-- Explain code or provide chat-style answers
-- Invent new APIs, helpers, or abstractions
-- Perform whole-project reasoning in a single request
-
-Its sole purpose is **accurate, minimal, inline code continuation**.
 
 ---
 
@@ -58,8 +46,10 @@ clangd --background-index --clang-tidy
 
 Clone the repository and add it to your load path:
 
+```emacs lisp
 (add-to-list 'load-path "/path/to/gptel-cpp-complete")
 (require 'gptel-cpp-complete)
+```
 
 ---
 
