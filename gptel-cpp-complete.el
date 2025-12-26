@@ -157,7 +157,6 @@
 
 (defun gptel-cpp-complete--call-hierarchy-item ()
   "Prepare call hierarchy item at point."
-  (interactive)
   (save-excursion
     (gptel-cpp-complete--goto-function-name)
     (when-let* ((server (eglot--current-server-or-lose))
