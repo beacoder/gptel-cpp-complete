@@ -40,10 +40,10 @@
 ;;; Change Log:
 ;;
 ;; 0.0.2 Replace MIT license with GPL license
-;; 0.1.0 Enhanced system prompt for C++ code completion
-;; 0.1.1 Add minor mode `gptel-cpp-complete-mode'
-;; 0.1.2 Adding `/no_think' for system prompt
-;; 0.1.3 Replace run-with-idle-time with run-with-timer
+;; 0.1.1 Enhanced system prompt for C++ code completion
+;; 0.1.2 Add minor mode `gptel-cpp-complete-mode'
+;; 0.1.3 Adding `/no_think' for system prompt
+;; 0.1.4 Replace run-with-idle-time with run-with-timer
 ;; 0.1.5 Fix <return> conflict between `corfu--insert' and `gptel-cpp-complete'
 
 ;;; Code:
