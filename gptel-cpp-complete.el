@@ -28,6 +28,15 @@
 
 ;;; C++ code completion powered by eglot, gptel, ag
 
+;;; Install:
+
+;; Put this file into load-path directory, and byte compile it if
+;; desired. And put the following expression into your ~/.emacs.d
+;;
+;; (require 'gptel-cpp-complete)
+;; (dolist (c-mode-hook '(c-mode-common-hook c-ts-mode-hook c++-ts-mode-hook))
+;;   (add-hook c-mode-hook #'gptel-cpp-complete-mode))
+
 ;;; Code:
 
 (require 'eglot)
