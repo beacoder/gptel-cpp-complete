@@ -38,8 +38,6 @@
 ;; ------------------------------------------------------------
 ;; Configuration
 ;; ------------------------------------------------------------
-(setq eglot-extend-to-xref t)
-
 (defgroup gptel-cpp-complete nil
   "GPTel-based C++ code completion."
   :group 'tools)
@@ -403,7 +401,24 @@ Callees of this function:
       (gptel-cpp-complete--clear-overlay)
       (gptel-cpp-complete--cancel-request)))))
 
-(add-hook 'post-command-hook #'gptel-cpp-complete--post-command)
+;; ------------------------------------------------------------
+;; Mode Definition
+;; ------------------------------------------------------------
+(defvar gptel-cpp-complete-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c TAB") #'gptel-cpp-complete)
+    map))
+
+(define-minor-mode gptel-cpp-complete-mode
+  "Mode for ai-assisted C++ completion powered by eglot + gptel."
+  :init-value nil :lighter nil :keymap gptel-cpp-complete-mode-map :interactive nil
+  (if gptel-cpp-complete-mode
+      (progn
+        (add-hook 'post-command-hook #'gptel-cpp-complete--post-command nil t)
+        (setq eglot-extend-to-xref t))
+    (remove-hook 'post-command-hook #'gptel-cpp-complete--post-command t)
+    (gptel-cpp-complete--clear-overlay)
+    (gptel-cpp-complete--cancel-request)))
 
 
 (provide 'gptel-cpp-complete)
