@@ -4,7 +4,7 @@
 
 ;; Author: Huming Chen <chenhuming@gmail.com>
 ;; URL: https://github.com/beacoder/gptel-cpp-complete
-;; Version: 0.0.1
+;; Version: 0.1.5
 ;; Created: 2025-12-26
 ;; Keywords: programming, convenience
 ;; Package-Requires: ((emacs "30.1") (eglot "1.19") (gptel "0.9.8"))
@@ -36,6 +36,15 @@
 ;; (require 'gptel-cpp-complete)
 ;; (dolist (c-mode-hook '(c-mode-common-hook c-ts-mode-hook c++-ts-mode-hook))
 ;;   (add-hook c-mode-hook #'gptel-cpp-complete-mode))
+
+;;; Change Log:
+;;
+;; 0.0.2 Replace MIT license with GPL license
+;; 0.1.0 Enhanced system prompt for C++ code completion
+;; 0.1.1 Add minor mode `gptel-cpp-complete-mode'
+;; 0.1.2 Adding `/no_think' for system prompt
+;; 0.1.3 Replace run-with-idle-time with run-with-timer
+;; 0.1.5 Fix <return> conflict between `corfu--insert' and `gptel-cpp-complete'
 
 ;;; Code:
 
