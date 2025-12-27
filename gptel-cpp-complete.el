@@ -430,14 +430,16 @@ Callees of this function:
 
 (define-minor-mode gptel-cpp-complete-mode
   "Mode for ai-assisted C++ completion powered by eglot + gptel."
-  :init-value nil :lighter nil :keymap gptel-cpp-complete-mode-map :interactive nil
-  (if gptel-cpp-complete-mode
-      (progn
-        (add-hook 'post-command-hook #'gptel-cpp-complete--post-command nil t)
-        (setq eglot-extend-to-xref t))
+  :group 'gptel-cpp-complete :keymap gptel-cpp-complete-mode-map
+  (cond
+   (gptel-cpp-complete-mode
+    (add-hook 'post-command-hook #'gptel-cpp-complete--post-command nil t)
+    (setq-local eglot-extend-to-xref t))
+   (t
     (remove-hook 'post-command-hook #'gptel-cpp-complete--post-command t)
     (gptel-cpp-complete--clear-overlay)
-    (gptel-cpp-complete--cancel-request)))
+    (gptel-cpp-complete--cancel-request)
+    (kill-local-variable 'eglot-extend-to-xref))))
 
 
 (provide 'gptel-cpp-complete)
