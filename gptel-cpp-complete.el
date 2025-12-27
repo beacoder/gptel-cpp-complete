@@ -278,7 +278,9 @@ You act as an intelligent autocomplete that suggests syntactically correct, cont
 - For new statements: Start with appropriate indentation
 - For method chains: Continue with available methods
 - For type names: Use exact types from in-scope symbols
-- Include necessary argument lists when completing function calls"
+- Include necessary argument lists when completing function calls
+
+/no_think"
   "Enhanced system prompt for C++ code completion.")
 
 (defconst gptel-cpp-complete--user-prompt
