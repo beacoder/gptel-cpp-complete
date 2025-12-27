@@ -51,8 +51,8 @@
   "GPTel-based C++ code completion."
   :group 'tools)
 
-(defcustom gptel-cpp-complete-idle-delay 0.25
-  "Idle time before regenerating GPTel completion."
+(defcustom gptel-cpp-complete-delay 1.5
+  "Delay time before regenerating GPTel completion."
   :type 'number
   :group 'gptel-cpp-complete)
 
@@ -388,10 +388,10 @@ Callees of this function:
   (gptel-cpp-complete--fire-request))
 
 (defun gptel-cpp-complete--schedule-regenerate ()
-  "Schedule GPTel completion after idle delay."
+  "Schedule GPTel completion after delay."
   (setq gptel-cpp-complete--regenerate-timer
-        (run-with-idle-timer
-         gptel-cpp-complete-idle-delay nil
+        (run-with-timer
+         gptel-cpp-complete-delay nil
          #'gptel-cpp-complete)))
 
 ;; ------------------------------------------------------------
