@@ -258,12 +258,13 @@
 
 (defun gptel-cpp-complete--call-hierarchy-context ()
   "Retrieve caller and callee infomation."
-  (when-let* ((item (gptel-cpp-complete--call-hierarchy-item)))
-    (let ((incoming (gptel-cpp-complete--incoming-calls item))
-          (outgoing (gptel-cpp-complete--outgoing-calls item)))
-      (cons
-       (or (gptel-cpp-complete--format-callers incoming) "None")
-       (or (gptel-cpp-complete--format-callees outgoing) "None")))))
+  (ignore-errors
+    (when-let* ((item (gptel-cpp-complete--call-hierarchy-item)))
+      (let ((incoming (gptel-cpp-complete--incoming-calls item))
+            (outgoing (gptel-cpp-complete--outgoing-calls item)))
+        (cons
+         (or (gptel-cpp-complete--format-callers incoming) "None")
+         (or (gptel-cpp-complete--format-callees outgoing) "None"))))))
 
 ;; ------------------------------------------------------------
 ;; Prompt Construction
