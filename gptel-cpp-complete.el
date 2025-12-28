@@ -129,6 +129,24 @@
        (or (and (>= c ?a) (<= c ?z))
            (and (>= c ?A) (<= c ?Z)))))
 
+(defun gptel-cpp-complete--in-string-or-comment-p ()
+  "Return non-nil if point is inside a string or comment."
+  (let ((state (syntax-ppss)))
+    (or (nth 3 state)  ;; string
+        (nth 4 state)))) ;; comment
+
+(defun gptel-cpp-complete--in-preprocessor-p ()
+  "Return non-nil if point is in a C/C++ preprocessor directive."
+  (save-excursion
+    (beginning-of-line)
+    (looking-at-p "\\s-*#")))
+
+(defun gptel-cpp-complete--context-allowed-p ()
+  "Return non-nil if completion is allowed at point."
+  (and
+   (not (gptel-cpp-complete--in-string-or-comment-p))
+   (not (gptel-cpp-complete--in-preprocessor-p))))
+
 ;; ------------------------------------------------------------
 ;; Context Extraction
 ;; ------------------------------------------------------------
@@ -483,6 +501,7 @@ Callees of this function:
   "Return non-nil if we should trigger GPT completion."
   (and
    (eq this-command 'self-insert-command)
+   (gptel-cpp-complete--context-allowed-p)
    (or
     ;; strong trigger point
     (gptel-cpp-complete--structural-trigger-p)
