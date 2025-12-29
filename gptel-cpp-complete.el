@@ -521,7 +521,6 @@ Callees of this function:
 ;; ------------------------------------------------------------
 (defvar gptel-cpp-complete-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c TAB") #'gptel-cpp-complete)
     (define-key map (kbd "<return>") #'gptel-cpp-complete-return)
     (define-key map (kbd "<RET>") #'gptel-cpp-complete-return)
     map))
