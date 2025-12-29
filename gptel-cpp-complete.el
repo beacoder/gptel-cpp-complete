@@ -149,10 +149,15 @@
   (when (treesit-ready-p 'cpp)
     (save-excursion
       (ignore-errors
-        (treesit-beginning-of-defun)
-        (let ((beg (point)))
+        (let ((cursor-pos (point)) func-start func-end
+              prefix suffix)
+          (treesit-beginning-of-defun)
+          (setq func-start (point))
           (treesit-end-of-defun)
-          (buffer-substring-no-properties beg (point)))))))
+          (setq func-end (point)
+                prefix (buffer-substring-no-properties func-start cursor-pos)
+                suffix (buffer-substring-no-properties cursor-pos func-end))
+          (concat prefix "<-- HERE -->" suffix))))))
 
 (defun gptel-cpp-complete--in-scope-symbols+kind ()
   "Return list of local symbols from Eglot."
@@ -208,8 +213,9 @@
 (defun gptel-cpp-complete--ag-search-pattern (pattern)
   "Search PATTERN using `ag'."
   (shell-command-to-string
-   (format "ag --cpp --nobreak --noheading -C 3 \"%s\" | head -n 30"
-           pattern)))
+   (format
+    "ag --cpp --nobreak --noheading --nocolor -C 3 \"%s\" | sed -E 's|^[^:]+:[0-9]+[:\-]||; /^--$/d; s/^[[:space:]]+//' | head -n 30"
+    pattern)))
 
 (defun gptel-cpp-complete--ag-similar-patterns (s-k)
   "Search similar patterns based on S-K."
@@ -308,7 +314,7 @@
 You act as an intelligent autocomplete that suggests syntactically correct, context-aware continuations using ONLY the provided symbols and patterns.
 
 ## CONTEXT PROVIDED
-- Current function body (cursor at insertion point)
+- Current function body (cursor marked with <-- HERE -->)
 - Authoritative list of in-scope symbols (variables, functions, types)
 - Repository code patterns (similar usage examples)
 - Callers of current function (how it's used)
@@ -346,9 +352,8 @@ You act as an intelligent autocomplete that suggests syntactically correct, cont
 
 (defconst gptel-cpp-complete--user-prompt
   "Current function:
-```cpp
 %s
-```
+
 In-scope symbols:
 %s
 
