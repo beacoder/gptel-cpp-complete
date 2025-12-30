@@ -425,7 +425,9 @@ Callees of this function:
   (cond
    ((gptel-cpp-complete--overlay-active-p)
     (gptel-cpp-complete--accept-overlay))
-   ((and (functionp 'corfu-insert) (>= corfu--index 0))
+   ((and (functionp 'corfu-insert)
+         (boundp 'corfu--index)
+         (>= corfu--index 0))
     (call-interactively #'corfu-insert))
    (t (call-interactively #'newline))))
 
