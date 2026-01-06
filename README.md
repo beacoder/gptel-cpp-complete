@@ -1,7 +1,7 @@
 # gptel-cpp-complete
 
 [![MELPA](https://melpa.org/packages/gptel-cpp-complete-badge.svg)](https://melpa.org/#/gptel-cpp-complete)
-[!(https://github.com/beacoder/gptel-cpp-complete/workflows/test/badge.svg)](https://github.com/beacoder/call-graph/actions)
+[![test](https://github.com/beacoder/gptel-cpp-complete/workflows/test/badge.svg)](https://github.com/beacoder/gptel-cpp-complete/actions)
 
 `gptel-cpp-complete` is an experimental package that provides
 **Copilot-style, context-aware C++ code completion** using:
