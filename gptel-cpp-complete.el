@@ -87,6 +87,15 @@
 ;; ------------------------------------------------------------
 ;; Helpers
 ;; ------------------------------------------------------------
+(defmacro gptel-cpp-complete--with-which-function-mode (&rest body)
+  "Execute BODY with `which-function-mode' enabled, then restore original state."
+  `(let ((enabled (bound-and-true-p which-function-mode)))
+     (unwind-protect
+         (progn
+           (which-function-mode 1)
+           ,@body)
+       (which-function-mode (if enabled 1 0)))))
+
 (defun gptel-cpp-complete--extract-method-name (func-name)
   "Given FUNC-NAME, return a SHORT-FUNC, e.g: class::method(arg1, arg2) => method."
   (when-let* ((temp-split (split-string func-name "("))
@@ -249,7 +258,8 @@
 (defun gptel-cpp-complete--call-hierarchy-item ()
   "Prepare call hierarchy item at point."
   (save-excursion
-    (gptel-cpp-complete--goto-function-name)
+    (gptel-cpp-complete--with-which-function-mode
+     (gptel-cpp-complete--goto-function-name))
     (when-let* ((server (eglot--current-server-or-lose))
                 (pos (eglot--pos-to-lsp-position (point)))
                 (params `(:textDocument (:uri ,(eglot-path-to-uri
