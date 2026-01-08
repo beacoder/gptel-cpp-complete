@@ -47,16 +47,26 @@ clangd --background-index --clang-tidy
 
 Recommended `eglot` configuration:
 ```emacs lisp
-(add-to-list 'eglot-server-programs
-                 '((c-mode c-ts-mode c++-mode c++-ts-mode objc-mode)
-                   . ("clangd"
-                      "--compile-commands-dir=./build/"
-                      "--background-index"
-                      "--clang-tidy"
-                      "--completion-style=detailed"
-                      "--header-insertion=never"
-                      "--pch-storage=memory"
-                      "--malloc-trim")))
+(use-package eglot
+   :ensure t
+   :hook (((c-mode c++-mode c-ts-mode c++-ts-mode) . eglot-ensure))
+   :init
+   (setq eglot-stay-out-of '(imenu)
+         read-process-output-max (* 1024 1024) ; 1MB
+         eglot-autoshutdown t
+         eglot-events-buffer-size 0
+         eglot-send-changes-idle-time 0.5)
+   :config
+   (add-to-list 'eglot-server-programs
+                '((c-mode c-ts-mode c++-mode c++-ts-mode objc-mode)
+                  . ("clangd"
+                     "--compile-commands-dir=./build/"
+                     "--background-index"
+                     "--clang-tidy"
+                     "--completion-style=detailed"
+                     "--header-insertion=never"
+                     "--pch-storage=memory"
+                     "--malloc-trim"))))
 ```
 
 Recommended `tree-sitter` configuration:
