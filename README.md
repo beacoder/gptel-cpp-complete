@@ -33,6 +33,7 @@ Its sole purpose is **accurate, minimal, inline code continuation**.
 
 - Emacs 30+
 - [`eglot`](https://elpa.gnu.org/packages/eglot.html)
+- [`tree-sitter`](https://github.com/tree-sitter/tree-sitter)
 - [`gptel`](https://github.com/karthink/gptel)
 - [`ag`](https://github.com/ggreer/the_silver_searcher)
 - `clangd` with background indexing enabled
