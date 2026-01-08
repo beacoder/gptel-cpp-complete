@@ -6,6 +6,7 @@
 **Copilot-style, context-aware C++ code completion** using:
 
 - **eglot + clangd** for authoritative semantic information
+- **tree-sitter** for correct current function retrieval
 - **ag (the_silver_searcher)** for repository-wide pattern retrieval
 - **gptel** for LLM-powered code continuation
 - **inline ghost text overlays** for a VS Code–like UX
