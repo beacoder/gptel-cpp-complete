@@ -7,7 +7,7 @@
 
 - **eglot + clangd** for authoritative semantic information
 - **tree-sitter** for correct current function retrieval
-- **ag (the_silver_searcher)** for repository-wide pattern retrieval
+- **rg/ag** for repository-wide pattern retrieval
 - **gptel** for LLM-powered code continuation
 - **inline ghost text overlays** for a VS Code–like UX
 
@@ -21,7 +21,7 @@ Its sole purpose is **accurate, minimal, inline code continuation**.
 
 - Context-aware C++ code completion inside functions
 - Uses *real* in-scope symbols from `clangd` (via `eglot`)
-- Retrieves similar usage patterns from your repository with `ag`
+- Retrieves similar usage patterns from your repository with `rg` or `ag'
 - Uses *real* call-hierarchy data from `clangd` (via `eglot`)
 - Strict system prompt to avoid hallucinated APIs
 - Inline “ghost text” suggestions
@@ -36,6 +36,7 @@ Its sole purpose is **accurate, minimal, inline code continuation**.
 - [`eglot/clangd`](https://github.com/joaotavora/eglot)
 - [`tree-sitter`](https://github.com/tree-sitter/tree-sitter)
 - [`gptel`](https://github.com/karthink/gptel)
+- [`rg`](https://github.com/BurntSushi/ripgrep)
 - [`ag`](https://github.com/ggreer/the_silver_searcher)
 
 Recommended `eglot` configuration:
