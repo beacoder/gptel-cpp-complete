@@ -4,7 +4,7 @@
 
 ;; Author: Huming Chen <chenhuming@gmail.com>
 ;; URL: https://github.com/beacoder/gptel-cpp-complete
-;; Version: 0.1.8
+;; Version: 0.1.9
 ;; Created: 2025-12-26
 ;; Keywords: programming, convenience
 ;; Package-Requires: ((emacs "30.1") (eglot "1.19") (gptel "0.9.8"))
@@ -49,6 +49,7 @@
 ;; 0.1.6 Remove duplicated texts from completion
 ;; 0.1.7 Retrieve completion-symbols and fix ag search issue
 ;; 0.1.8 Show completion only when location didn't change
+;; 0.1.9 Add rg support
 
 ;;; Code:
 
@@ -81,6 +82,11 @@
 
 (defcustom gptel-cpp-complete-ag-cmd "ag --cpp --nobreak --noheading -C 3 \"%s\" | cut -d: -f2- | head -n 30"
   "Ag command to search similar pattern."
+  :type 'string
+  :group 'gptel-cpp-complete)
+
+(defcustom gptel-cpp-complete-rg-cmd "rg -t cpp -C 3 \"%s\" --no-heading --color never | head -n 30"
+  "Rg command to search similar pattern."
   :type 'string
   :group 'gptel-cpp-complete)
 
@@ -226,8 +232,8 @@
    (gptel-cpp-complete--safe-subseq (plist-get classified :vars) 0 1)
    (gptel-cpp-complete--safe-subseq (plist-get classified :members) 0 1)))
 
-(defun gptel-cpp-complete--ag-pattern-for-symbol (symbol)
-  "Format SYMBOL for searching with `ag'."
+(defun gptel-cpp-complete--grep-pattern-for-symbol (symbol)
+  "Format SYMBOL for searching with `ag' or `rg'."
   (let* ((name (plist-get symbol :label))
          (kind (plist-get symbol :kind)))
     (cond
@@ -243,19 +249,22 @@
      (t
       (format "\\b%s\\b" name)))))
 
-(defun gptel-cpp-complete--ag-search-pattern (pattern)
-  "Search PATTERN using `ag'."
-  (shell-command-to-string (format gptel-cpp-complete-ag-cmd pattern)))
+(defun gptel-cpp-complete--grep-search-pattern (pattern)
+  "Search PATTERN using `ag' or `rg'."
+  (let ((cmd (cond ((executable-find "rg") gptel-cpp-complete-rg-cmd)
+                   ((executable-find "ag") gptel-cpp-complete-ag-cmd)
+                   (t (error "Neither rg nor ag found")))))
+    (shell-command-to-string (format cmd pattern))))
 
-(defun gptel-cpp-complete--ag-similar-patterns (s-k)
+(defun gptel-cpp-complete--grep-similar-patterns (s-k)
   "Search similar patterns based on S-K."
   (let* ((symbols s-k)
          (classified (gptel-cpp-complete--classify-symbols symbols))
          (targets (gptel-cpp-complete--select-search-symbols classified)))
     (string-join
      (cl-loop for sym in targets
-              for pat = (gptel-cpp-complete--ag-pattern-for-symbol sym)
-              collect (gptel-cpp-complete--ag-search-pattern pat))
+              for pat = (gptel-cpp-complete--grep-pattern-for-symbol sym)
+              collect (gptel-cpp-complete--grep-search-pattern pat))
      "\n\n")))
 
 ;; ------------------------------------------------------------
@@ -400,7 +409,7 @@ Callees of this function:
          (symbols+kind (or (gptel-cpp-complete--in-scope-symbols+kind) '()))
          (symbols (or (delete-dups (mapcar #'car symbols+kind)) '()))
          (s+k (or (mapcar #'cdr symbols+kind) '()))
-         (patterns (or (gptel-cpp-complete--ag-similar-patterns s+k) "None found"))
+         (patterns (or (gptel-cpp-complete--grep-similar-patterns s+k) "None found"))
          (calls (and gptel-cpp-complete-include-call-hierarchy
                      (gptel-cpp-complete--call-hierarchy-context)))
          (incomming (or (car calls) "None found"))
