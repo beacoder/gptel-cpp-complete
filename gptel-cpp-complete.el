@@ -4,7 +4,7 @@
 
 ;; Author: Huming Chen <chenhuming@gmail.com>
 ;; URL: https://github.com/beacoder/gptel-cpp-complete
-;; Version: 0.1.9
+;; Version: 0.2.0
 ;; Created: 2025-12-26
 ;; Keywords: programming, convenience
 ;; Package-Requires: ((emacs "30.1") (eglot "1.19") (gptel "0.9.8"))
@@ -50,11 +50,13 @@
 ;; 0.1.7 Retrieve completion-symbols and fix ag search issue
 ;; 0.1.8 Show completion only when location didn't change
 ;; 0.1.9 Add rg support
+;; 0.2.0 Improve stability.
 
 ;;; Code:
 
 (require 'eglot)
 (require 'gptel)
+(require 'cl-lib)
 (require 'treesit)
 (require 'which-func)
 
@@ -80,32 +82,30 @@
   :type 'integer
   :group 'gptel-cpp-complete)
 
-(defcustom gptel-cpp-complete-ag-cmd "ag --cpp --nobreak --noheading -C 3 \"%s\" | cut -d: -f2- | head -n 30"
-  "Ag command to search similar pattern."
+(defcustom gptel-cpp-complete-ag-cmd "ag --cpp --nobreak --noheading -C 3 %s | cut -d: -f2- | head -n 30"
+  "Ag command to search similar pattern.
+The %s placeholder is replaced with the shell-quoted search pattern."
   :type 'string
   :group 'gptel-cpp-complete)
 
-(defcustom gptel-cpp-complete-rg-cmd "rg -t cpp -C 3 \"%s\" --no-heading --color never | head -n 30"
-  "Rg command to search similar pattern."
+(defcustom gptel-cpp-complete-rg-cmd "rg -t cpp -C 3 %s --no-heading --color never | head -n 30"
+  "Rg command to search similar pattern.
+The %s placeholder is replaced with the shell-quoted search pattern."
   :type 'string
+  :group 'gptel-cpp-complete)
+
+(defcustom gptel-cpp-complete-debug nil
+  "When non-nil, log warnings for internal errors instead of silencing them."
+  :type 'boolean
   :group 'gptel-cpp-complete)
 
 ;; ------------------------------------------------------------
 ;; Helpers
 ;; ------------------------------------------------------------
 (defun gptel-cpp-complete--get-treesit-extra-load-path ()
-  "Get `treesiter' extra load path."
+  "Get `treesit' extra load path for grammar libraries."
   (when-let ((lib (locate-library "gptel-cpp-complete")))
     (list (file-name-directory lib))))
-
-(defmacro gptel-cpp-complete--with-which-function-mode (&rest body)
-  "Execute BODY with `which-function-mode' enabled, then restore original state."
-  `(let ((enabled (bound-and-true-p which-function-mode)))
-     (unwind-protect
-         (progn
-           (which-function-mode 1)
-           ,@body)
-       (which-function-mode (if enabled 1 0)))))
 
 (defun gptel-cpp-complete--extract-method-name (func-name)
   "Given FUNC-NAME, return a SHORT-FUNC, e.g: class::method(arg1, arg2) => method."
@@ -121,7 +121,7 @@
               (not-empty (not (string-empty-p func-name)))
               (func-name (gptel-cpp-complete--extract-method-name func-name))
               (not-empty (not (string-empty-p func-name))))
-    (search-forward func-name)))
+    (search-forward func-name nil t)))
 
 (defun gptel-cpp-complete--safe-subseq (seq start end)
   "Safely extracts a subseq from SEQ from START to END (not included)."
@@ -159,7 +159,7 @@
 ;; ------------------------------------------------------------
 (defun gptel-cpp-complete--completion-symbols-lite ()
   "Return a limited list of LSP completion items at point."
-  (when-let* ((server (eglot--current-server-or-lose))
+  (when-let* ((server (eglot-current-server))
               (pos    (eglot--pos-to-lsp-position (point)))
               (params `(:textDocument (:uri ,(eglot-path-to-uri
                                               (buffer-file-name)))
@@ -200,18 +200,24 @@
 ;; ------------------------------------------------------------
 (defun gptel-cpp-complete--cpp-current-function ()
   "Return current C++ function definition as string."
-  (when (treesit-ready-p 'cpp)
+  (when (treesit-ready-p 'cpp t)
     (save-excursion
-      (ignore-errors
-        (let ((cursor-pos (point)) func-start func-end
-              prefix suffix)
-          (treesit-beginning-of-defun)
-          (setq func-start (point))
-          (treesit-end-of-defun)
-          (setq func-end (point)
-                prefix (buffer-substring-no-properties func-start cursor-pos)
-                suffix (buffer-substring-no-properties cursor-pos func-end))
-          (concat prefix "<-- HERE -->" suffix))))))
+      (condition-case err
+          (let ((cursor-pos (point)) func-start func-end
+                prefix suffix)
+            (treesit-beginning-of-defun)
+            (setq func-start (point))
+            (treesit-end-of-defun)
+            (setq func-end (point)
+                  prefix (buffer-substring-no-properties func-start cursor-pos)
+                  suffix (buffer-substring-no-properties cursor-pos func-end))
+            (concat prefix "<-- HERE -->" suffix))
+        (error
+         (when gptel-cpp-complete-debug
+           (display-warning 'gptel-cpp-complete
+                            (format "Error in --cpp-current-function: %s" err)
+                            :warning))
+         nil)))))
 
 ;; ------------------------------------------------------------
 ;; Extraction similar pattern
@@ -253,7 +259,7 @@
   (let ((cmd (cond ((executable-find "rg") gptel-cpp-complete-rg-cmd)
                    ((executable-find "ag") gptel-cpp-complete-ag-cmd)
                    (t (error "Neither rg nor ag found")))))
-    (shell-command-to-string (format cmd pattern))))
+    (shell-command-to-string (format cmd (shell-quote-argument pattern)))))
 
 (defun gptel-cpp-complete--grep-similar-patterns (s-k)
   "Search similar patterns based on S-K."
@@ -272,9 +278,8 @@
 (defun gptel-cpp-complete--call-hierarchy-item ()
   "Prepare call hierarchy item at point."
   (save-excursion
-    (gptel-cpp-complete--with-which-function-mode
-     (gptel-cpp-complete--goto-function-name))
-    (when-let* ((server (eglot--current-server-or-lose))
+    (gptel-cpp-complete--goto-function-name)
+    (when-let* ((server (eglot-current-server))
                 (pos (eglot--pos-to-lsp-position (point)))
                 (params `(:textDocument (:uri ,(eglot-path-to-uri
                                                 (buffer-file-name)))
@@ -286,27 +291,27 @@
       (aref result 0))))
 
 (defun gptel-cpp-complete--incoming-calls (item)
-  "Query incomming call of ITEM."
-  (when item
+  "Query incoming call of ITEM."
+  (when-let* ((item item)
+              (server (eglot-current-server)))
     (ignore-errors
-      (jsonrpc-request
-       (eglot--current-server-or-lose)
-       :callHierarchy/incomingCalls
-       `(:item ,item)))))
+      (jsonrpc-request server
+                       :callHierarchy/incomingCalls
+                       `(:item ,item)))))
 
 (defun gptel-cpp-complete--outgoing-calls (item)
   "Query outgoing call of ITEM."
-  (when item
+  (when-let* ((item item)
+              (server (eglot-current-server)))
     (ignore-errors
-      (jsonrpc-request
-       (eglot--current-server-or-lose)
-       :callHierarchy/outgoingCalls
-       `(:item ,item)))))
+      (jsonrpc-request server
+                       :callHierarchy/outgoingCalls
+                       `(:item ,item)))))
 
 (defun gptel-cpp-complete--snippet-from-range (uri range)
   "Extract code snippets based on URI and RANGE."
   (with-temp-buffer
-    (insert-file-contents-literally (eglot-uri-to-path uri))
+    (insert-file-contents (eglot-uri-to-path uri))
     (save-excursion
       (goto-char (eglot--lsp-position-to-point
                   (plist-get (aref range 0) :start)))
@@ -337,7 +342,7 @@
      "\n\n")))
 
 (defun gptel-cpp-complete--call-hierarchy-context ()
-  "Retrieve caller and callee infomation."
+  "Retrieve caller and callee information."
   (ignore-errors
     (when-let* ((item (gptel-cpp-complete--call-hierarchy-item)))
       (let ((incoming (gptel-cpp-complete--incoming-calls item))
@@ -408,16 +413,17 @@ Callees of this function:
          (symbols+kind (or (gptel-cpp-complete--in-scope-symbols+kind) '()))
          (symbols (or (delete-dups (mapcar #'car symbols+kind)) '()))
          (s+k (or (mapcar #'cdr symbols+kind) '()))
-         (patterns (or (gptel-cpp-complete--grep-similar-patterns s+k) "None found"))
+         (patterns (let ((p (gptel-cpp-complete--grep-similar-patterns s+k)))
+                    (if (string-empty-p p) "None found" p)))
          (calls (and gptel-cpp-complete-include-call-hierarchy
                      (gptel-cpp-complete--call-hierarchy-context)))
-         (incomming (or (car calls) "None found"))
+         (incoming (or (car calls) "None found"))
          (outgoing (or (cdr calls) "None found")))
     (format gptel-cpp-complete--user-prompt
             func
             (string-join symbols "\n\n")
             patterns
-            incomming
+            incoming
             outgoing)))
 
 ;; ------------------------------------------------------------
@@ -476,7 +482,8 @@ Callees of this function:
 (defun gptel-cpp-complete--cancel-request ()
   "Cancel any in-flight gptel request for this buffer."
   (when gptel-cpp-complete--regenerate-timer
-    (cancel-timer gptel-cpp-complete--regenerate-timer))
+    (cancel-timer gptel-cpp-complete--regenerate-timer)
+    (setq gptel-cpp-complete--regenerate-timer nil))
   (when gptel-cpp-complete--request
     (ignore-errors
       (gptel-abort gptel-cpp-complete--request))
@@ -487,7 +494,8 @@ Callees of this function:
   (setq gptel-cpp-complete--request nil)
   (when (and response (stringp response))
     (message "")
-    (if (and (eq (current-buffer) gptel-cpp-complete--original-buffer)
+    (if (and (buffer-live-p gptel-cpp-complete--original-buffer)
+             (eq (current-buffer) gptel-cpp-complete--original-buffer)
              (= (point) gptel-cpp-complete--original-position))
         (gptel-cpp-complete--show-overlay response)
       (gptel-cpp-complete--clear-overlay))))
@@ -504,11 +512,14 @@ Callees of this function:
 
 (defun gptel-cpp-complete ()
   "Request GPTel code completion."
-  (message "Generating completion...")
-  (gptel-cpp-complete--fire-request))
+  (setq gptel-cpp-complete--regenerate-timer nil)
+  (when (eq (current-buffer) gptel-cpp-complete--original-buffer)
+    (message "Generating completion...")
+    (gptel-cpp-complete--fire-request)))
 
 (defun gptel-cpp-complete--schedule-regenerate ()
   "Schedule GPTel completion after delay."
+  (setq gptel-cpp-complete--original-buffer (current-buffer))
   (setq gptel-cpp-complete--regenerate-timer
         (run-with-timer
          gptel-cpp-complete-delay nil
@@ -526,7 +537,7 @@ Callees of this function:
 
 (defun gptel-cpp-complete--post-command ()
   "Post-command hook driving GPTel completion."
-  (when (derived-mode-p 'c++-mode)
+  (when (derived-mode-p 'c++-mode 'c++-ts-mode)
     (gptel-cpp-complete--clear-overlay)
     (gptel-cpp-complete--cancel-request)
     (when (gptel-cpp-complete--should-trigger-p)
@@ -541,6 +552,7 @@ Callees of this function:
     (define-key map (kbd "<return>") #'gptel-cpp-complete-return)
     map))
 
+;;;###autoload
 (define-minor-mode gptel-cpp-complete-mode
   "Mode for ai-assisted C++ completion powered by eglot + gptel."
   :group 'gptel-cpp-complete :keymap gptel-cpp-complete-mode-map
