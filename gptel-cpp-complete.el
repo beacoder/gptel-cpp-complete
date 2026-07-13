@@ -117,10 +117,18 @@ The %s placeholder is replaced with the shell-quoted search pattern."
   :type 'string
   :group 'gptel-cpp-complete)
 
-(defcustom gptel-cpp-complete-trigger-characters '(?. ?> ?: ?\s ?\( ?,)
+(defcustom gptel-cpp-complete-trigger-characters nil
   "Characters that trigger completion.
-Completion is only scheduled when `self-insert-command' inserts one of these."
+When non-nil, completion is only scheduled when `self-insert-command' inserts
+one of these characters.  When nil (the default), any self-insert triggers
+completion (original behavior)."
   :type '(repeat character)
+  :group 'gptel-cpp-complete)
+
+(defcustom gptel-cpp-complete-lsp-timeout 2
+  "Timeout in seconds for LSP requests (completion, call hierarchy).
+Prevents blocking Emacs when clangd is slow."
+  :type 'number
   :group 'gptel-cpp-complete)
 
 (defcustom gptel-cpp-complete-debug nil
@@ -183,9 +191,11 @@ Completion is only scheduled when `self-insert-command' inserts one of these."
                                               (buffer-file-name)))
                                       :position ,pos
                                       :context (:triggerKind 1)))
-              (result (jsonrpc-request server
-                                       :textDocument/completion
-                                       params)))
+              (result (ignore-errors
+                        (jsonrpc-request server
+                                         :textDocument/completion
+                                         params
+                                         :timeout gptel-cpp-complete-lsp-timeout))))
     (let ((items (cond
                   ((vectorp result) result)
                   ((plist-get result :items))
@@ -278,24 +288,52 @@ Completion is only scheduled when `self-insert-command' inserts one of these."
      (t
       (format "\\b%s\\b" name)))))
 
-(defun gptel-cpp-complete--grep-search-combined (patterns)
-  "Search all PATTERNS using a single `rg' or `ag' invocation with alternation."
-  (when patterns
+(defun gptel-cpp-complete--grep-search-async (patterns owner-buf callback)
+  "Search PATTERNS asynchronously, call CALLBACK with result string.
+OWNER-BUF is the buffer that owns this request (for process tracking)."
+  (if (not patterns)
+      (funcall callback "")
     (let* ((combined (format "(%s)" (string-join patterns "|")))
-           (cmd (cond ((executable-find "rg") gptel-cpp-complete-rg-cmd)
-                      ((executable-find "ag") gptel-cpp-complete-ag-cmd)
-                      (t (error "Neither rg nor ag found")))))
-      (shell-command-to-string (format cmd (shell-quote-argument combined))))))
-
-(defun gptel-cpp-complete--grep-similar-patterns (s-k)
-  "Search similar patterns based on S-K using a single grep invocation."
-  (let* ((symbols s-k)
-         (classified (gptel-cpp-complete--classify-symbols symbols))
-         (targets (gptel-cpp-complete--select-search-symbols classified))
-         (patterns (cl-loop for sym in targets
-                            for pat = (gptel-cpp-complete--grep-pattern-for-symbol sym)
-                            when pat collect pat)))
-    (or (gptel-cpp-complete--grep-search-combined patterns) "")))
+           (cmd-template (cond ((executable-find "rg") gptel-cpp-complete-rg-cmd)
+                               ((executable-find "ag") gptel-cpp-complete-ag-cmd)
+                               (t nil)))
+           (full-cmd (when cmd-template
+                       (format cmd-template (shell-quote-argument combined)))))
+      (if (not full-cmd)
+          (funcall callback "")
+        (let ((output-buf (generate-new-buffer " *gptel-grep*")))
+          (condition-case err
+              (let ((proc (start-process-shell-command
+                           "gptel-grep" output-buf full-cmd)))
+                ;; Track process in owner buffer for cancellation
+                (when (buffer-live-p owner-buf)
+                  (with-current-buffer owner-buf
+                    (setq gptel-cpp-complete--grep-process proc)))
+                (set-process-sentinel
+                 proc
+                 (lambda (proc _event)
+                   (when (memq (process-status proc) '(exit signal))
+                     (let ((result (when (and (buffer-live-p output-buf)
+                                             (eq (process-status proc) 'exit))
+                                     (with-current-buffer output-buf
+                                       (buffer-string)))))
+                       (when (buffer-live-p output-buf)
+                         (kill-buffer output-buf))
+                       (when (buffer-live-p owner-buf)
+                         (with-current-buffer owner-buf
+                           (setq gptel-cpp-complete--grep-process nil)))
+                       ;; Only invoke callback on exit (any code), not signal
+                       ;; rg/ag exit 1 = no matches, which is fine
+                       (when (eq (process-status proc) 'exit)
+                         (funcall callback (or result ""))))))))
+            (error
+             (when (buffer-live-p output-buf)
+               (kill-buffer output-buf))
+             (when gptel-cpp-complete-debug
+               (display-warning 'gptel-cpp-complete
+                                (format "Grep async error: %s" err)
+                                :warning))
+             (funcall callback ""))))))))
 
 
 ;; ------------------------------------------------------------
@@ -310,9 +348,11 @@ Completion is only scheduled when `self-insert-command' inserts one of these."
                 (params `(:textDocument (:uri ,(eglot-path-to-uri
                                                 (buffer-file-name)))
                                         :position ,pos))
-                (result (jsonrpc-request server
-                                         :textDocument/prepareCallHierarchy
-                                         params))
+                (result (ignore-errors
+                          (jsonrpc-request server
+                                           :textDocument/prepareCallHierarchy
+                                           params
+                                           :timeout gptel-cpp-complete-lsp-timeout)))
                 (valid (not (seq-empty-p result))))
       (aref result 0))))
 
@@ -323,7 +363,8 @@ Completion is only scheduled when `self-insert-command' inserts one of these."
     (ignore-errors
       (jsonrpc-request server
                        :callHierarchy/incomingCalls
-                       `(:item ,item)))))
+                       `(:item ,item)
+                       :timeout gptel-cpp-complete-lsp-timeout))))
 
 (defun gptel-cpp-complete--outgoing-calls (item)
   "Query outgoing call of ITEM."
@@ -332,7 +373,8 @@ Completion is only scheduled when `self-insert-command' inserts one of these."
     (ignore-errors
       (jsonrpc-request server
                        :callHierarchy/outgoingCalls
-                       `(:item ,item)))))
+                       `(:item ,item)
+                       :timeout gptel-cpp-complete-lsp-timeout))))
 
 (defun gptel-cpp-complete--snippet-from-range (uri range file-cache)
   "Extract code snippets based on URI and RANGE, using FILE-CACHE hash table."
@@ -445,39 +487,43 @@ Callees of this function:
   "Completion user prompt.")
 
 (defun gptel-cpp-complete--build-prompt ()
-  "Assemble GPTel completion prompt."
+  "Assemble GPTel completion prompt synchronously (used by async pipeline)."
   (let* ((func (or (gptel-cpp-complete--cpp-current-function) "N/A"))
          (symbols+kind (or (gptel-cpp-complete--in-scope-symbols+kind) '()))
          (symbols (or (cl-remove-duplicates (mapcar #'car symbols+kind)
                                             :test #'equal)
                       '()))
          (s+k (or (mapcar #'cdr symbols+kind) '()))
-         (patterns (let ((p (gptel-cpp-complete--grep-similar-patterns s+k)))
-                    (if (string-empty-p p) "None found" p)))
          (calls (and gptel-cpp-complete-include-call-hierarchy
                      (gptel-cpp-complete--call-hierarchy-context)))
          (incoming (or (car calls) "None found"))
          (outgoing (or (cdr calls) "None found")))
+    (list :func func :symbols symbols :s+k s+k
+          :incoming incoming :outgoing outgoing)))
+
+(defun gptel-cpp-complete--format-prompt (parts patterns)
+  "Format the final prompt from PARTS and grep PATTERNS result."
+  (let ((pat-str (if (or (null patterns) (string-empty-p patterns))
+                     "None found" patterns)))
     (format gptel-cpp-complete--user-prompt
-            func
-            (string-join symbols "\n\n")
-            patterns
-            incoming
-            outgoing)))
+            (plist-get parts :func)
+            (string-join (plist-get parts :symbols) "\n\n")
+            pat-str
+            (plist-get parts :incoming)
+            (plist-get parts :outgoing))))
 
 ;; ------------------------------------------------------------
 ;; Overlay Management
 ;; ------------------------------------------------------------
 (defvar-local gptel-cpp-complete--overlay nil)
-(defvar-local gptel-cpp-complete--original-buffer nil)
-(defvar-local gptel-cpp-complete--original-position nil)
 
 (defun gptel-cpp-complete--clear-overlay ()
   "Remove GPTel completion overlay."
   (interactive)
   (when (overlayp gptel-cpp-complete--overlay)
     (delete-overlay gptel-cpp-complete--overlay))
-  (setq gptel-cpp-complete--overlay nil))
+  (setq gptel-cpp-complete--overlay nil
+        gptel-cpp-complete--last-tick nil))
 
 (defun gptel-cpp-complete--overlay-active-p ()
   "Return non-nil if GPTel overlay is active."
@@ -490,7 +536,8 @@ Callees of this function:
   (setq gptel-cpp-complete--overlay (make-overlay (point) (point)))
   (overlay-put gptel-cpp-complete--overlay
                'after-string
-               (propertize text 'face 'shadow)))
+               (propertize text 'face 'shadow))
+  (setq gptel-cpp-complete--last-tick (buffer-chars-modified-tick)))
 
 (defun gptel-cpp-complete--overlay-text ()
   "Return the text of the current overlay, or nil."
@@ -563,41 +610,72 @@ Callees of this function:
 ;; ------------------------------------------------------------
 (defvar-local gptel-cpp-complete--regenerate-timer nil)
 (defvar-local gptel-cpp-complete--request nil)
+(defvar-local gptel-cpp-complete--grep-process nil)
+(defvar-local gptel-cpp-complete--request-seq 0
+  "Sequence number to detect stale async callbacks.")
 
 (defun gptel-cpp-complete--cancel-request ()
-  "Cancel any in-flight gptel request for this buffer."
+  "Cancel any in-flight gptel request, grep process, or timer for this buffer."
   (when gptel-cpp-complete--regenerate-timer
     (cancel-timer gptel-cpp-complete--regenerate-timer)
     (setq gptel-cpp-complete--regenerate-timer nil))
+  ;; Kill in-flight grep process
+  (when (and gptel-cpp-complete--grep-process
+             (process-live-p gptel-cpp-complete--grep-process))
+    (delete-process gptel-cpp-complete--grep-process))
+  (setq gptel-cpp-complete--grep-process nil)
+  ;; Bump sequence to invalidate any pending async callbacks
+  (cl-incf gptel-cpp-complete--request-seq)
   (when gptel-cpp-complete--request
     (ignore-errors
       (gptel-abort gptel-cpp-complete--request))
     (setq gptel-cpp-complete--request nil)))
 
-(defun gptel-cpp-complete--handle-response (response _info)
-  "Display GPTel RESPONSE in the originating buffer."
-  (let ((buf gptel-cpp-complete--original-buffer)
-        (pos gptel-cpp-complete--original-position))
-    (setq gptel-cpp-complete--request nil)
-    (when (and response (stringp response))
-      (message "")
-      (if (buffer-live-p buf)
-          (with-current-buffer buf
-            (if (= (point) pos)
-                (gptel-cpp-complete--show-overlay response)
-              (gptel-cpp-complete--clear-overlay)))
-        ;; Buffer was killed, nothing to do
-        nil))))
+(defun gptel-cpp-complete--make-response-handler (buf pos seq)
+  "Return a response handler bound to BUF, POS, and SEQ for staleness detection."
+  (lambda (response _info)
+    (when (and response (stringp response)
+               (buffer-live-p buf))
+      (with-current-buffer buf
+        (setq gptel-cpp-complete--request nil)
+        (message "")
+        ;; Only show if sequence hasn't changed (no new request started)
+        ;; and point hasn't moved
+        (if (and (= seq gptel-cpp-complete--request-seq)
+                 (= (point) pos))
+            (gptel-cpp-complete--show-overlay response)
+          (gptel-cpp-complete--clear-overlay))))))
 
 (defun gptel-cpp-complete--fire-request ()
-  "Start a new AI completion request, canceling any in-flight one."
-  (setq gptel-cpp-complete--original-buffer (current-buffer)
-        gptel-cpp-complete--original-position (point)
-        gptel-cpp-complete--request
-        (gptel-request
-            (gptel-cpp-complete--build-prompt)
-          :system gptel-cpp-complete--system-prompt
-          :callback #'gptel-cpp-complete--handle-response)))
+  "Start a new AI completion request with async grep.
+Gathers LSP data synchronously (fast), runs grep asynchronously,
+then fires the gptel request once grep completes."
+  (let* ((buf (current-buffer))
+         (pos (point))
+         (seq gptel-cpp-complete--request-seq)
+         (parts (gptel-cpp-complete--build-prompt))
+         (s+k (plist-get parts :s+k))
+         (classified (gptel-cpp-complete--classify-symbols s+k))
+         (targets (gptel-cpp-complete--select-search-symbols classified))
+         (patterns (cl-loop for sym in targets
+                            for pat = (gptel-cpp-complete--grep-pattern-for-symbol sym)
+                            when pat collect pat)))
+    (gptel-cpp-complete--grep-search-async
+     patterns
+     buf
+     (lambda (grep-result)
+       ;; Only proceed if this request is still current
+       (when (and (buffer-live-p buf)
+                  (with-current-buffer buf
+                    (and (= seq gptel-cpp-complete--request-seq)
+                         (= (point) pos))))
+         (with-current-buffer buf
+           (let ((prompt (gptel-cpp-complete--format-prompt parts grep-result)))
+             (setq gptel-cpp-complete--request
+                   (gptel-request prompt
+                     :system gptel-cpp-complete--system-prompt
+                     :callback (gptel-cpp-complete--make-response-handler
+                                buf pos seq))))))))))
 
 (defun gptel-cpp-complete--do-complete (buf pos)
   "Actually fire the completion request for BUF at POS.
@@ -613,7 +691,6 @@ Only proceeds if the buffer is alive and point hasn't moved."
   (gptel-cpp-complete--cancel-request)
   (let ((buf (current-buffer))
         (pos (point)))
-    (setq gptel-cpp-complete--original-buffer buf)
     (setq gptel-cpp-complete--regenerate-timer
           (run-with-timer
            gptel-cpp-complete-delay nil
@@ -628,20 +705,34 @@ Only proceeds if the buffer is alive and point hasn't moved."
 ;; ------------------------------------------------------------
 (defun gptel-cpp-complete--should-trigger-p ()
   "Return non-nil if we should trigger GPT completion.
-Only triggers on configured trigger characters, outside strings/comments/preprocessor."
+Only triggers on configured trigger characters (or any char if nil),
+outside strings/comments/preprocessor."
   (and
    (eq this-command 'self-insert-command)
    (not (gptel-cpp-complete--in-string-or-comment-p))
    (not (gptel-cpp-complete--in-preprocessor-p))
-   (memq (char-before) gptel-cpp-complete-trigger-characters)))
+   (or (null gptel-cpp-complete-trigger-characters)
+       (memq (char-before) gptel-cpp-complete-trigger-characters))))
+
+(defvar-local gptel-cpp-complete--last-tick nil
+  "Buffer modification tick when overlay was shown.")
 
 (defun gptel-cpp-complete--post-command ()
   "Post-command hook driving GPTel completion."
-  (when (derived-mode-p 'c++-mode 'c++-ts-mode)
-    (gptel-cpp-complete--clear-overlay)
-    (gptel-cpp-complete--cancel-request)
-    (when (gptel-cpp-complete--should-trigger-p)
-      (gptel-cpp-complete--schedule-regenerate))))
+  (when (derived-mode-p 'c++-mode 'c++-ts-mode 'c-mode)
+    (cond
+     ;; Typing: clear overlay, cancel old request, maybe start new one
+     ((gptel-cpp-complete--should-trigger-p)
+      (gptel-cpp-complete--clear-overlay)
+      (gptel-cpp-complete--cancel-request)
+      (gptel-cpp-complete--schedule-regenerate))
+     ;; Buffer was modified by something other than self-insert (delete, yank, etc.)
+     ((and gptel-cpp-complete--last-tick
+           (not (= gptel-cpp-complete--last-tick (buffer-chars-modified-tick))))
+      (gptel-cpp-complete--clear-overlay)
+      (gptel-cpp-complete--cancel-request))
+     ;; Non-editing command (movement, scroll) — leave overlay alone
+     (t nil))))
 
 ;; ------------------------------------------------------------
 ;; Mode Definition
@@ -674,6 +765,254 @@ Only triggers on configured trigger characters, outside strings/comments/preproc
     (with-current-buffer buf
       (when gptel-cpp-complete-mode
         (gptel-cpp-complete-mode -1)))))
+
+;; ------------------------------------------------------------
+;; Self-Test (run with: emacs --batch -l gptel-cpp-complete.el -f gptel-cpp-complete-run-tests)
+;; ------------------------------------------------------------
+(defun gptel-cpp-complete-run-tests ()
+  "Run built-in self-tests.  Exit with non-zero status on failure."
+  (let ((pass 0) (fail 0))
+    (cl-flet ((check (name ok)
+                (if ok
+                    (progn (princ (format "  PASS: %s\n" name))
+                           (cl-incf pass))
+                  (princ (format "  FAIL: %s\n" name))
+                  (cl-incf fail))))
+
+      (princ "gptel-cpp-complete self-tests\n")
+      (princ "=============================\n")
+
+      ;; --- Helpers ---
+      (check "extract-method-name basic"
+             (equal "doStuff"
+                    (gptel-cpp-complete--extract-method-name
+                     "MyClass::doStuff(int a, int b)")))
+      (check "extract-method-name no namespace"
+             (equal "foo"
+                    (gptel-cpp-complete--extract-method-name "foo()")))
+      (check "extract-method-name nested"
+             (equal "bar"
+                    (gptel-cpp-complete--extract-method-name "A::B::bar(x)")))
+
+      (check "safe-subseq normal"
+             (equal '(2 3) (gptel-cpp-complete--safe-subseq '(1 2 3 4) 1 3)))
+      (check "safe-subseq past end"
+             (equal '(3 4) (gptel-cpp-complete--safe-subseq '(1 2 3 4) 2 99)))
+      (check "safe-subseq nil"
+             (null (gptel-cpp-complete--safe-subseq nil 0 5)))
+
+      (check "word-at-overlay-start"
+             (with-temp-buffer
+               (insert "foo_bar")
+               (equal "foo_bar" (gptel-cpp-complete--word-at-overlay-start))))
+      (check "word-at-overlay-start empty"
+             (with-temp-buffer
+               (insert "  ")
+               (equal "" (gptel-cpp-complete--word-at-overlay-start))))
+
+      (check "in-string-or-comment (not)"
+             (with-temp-buffer
+               (c++-mode)
+               (insert "int x = 1;")
+               (not (gptel-cpp-complete--in-string-or-comment-p))))
+      (check "in-string-or-comment (string)"
+             (with-temp-buffer
+               (emacs-lisp-mode)  ; reliable syntax in batch
+               (insert "\"inside string")
+               (syntax-propertize (point-max))
+               (gptel-cpp-complete--in-string-or-comment-p)))
+      (check "in-string-or-comment (comment)"
+             (with-temp-buffer
+               (emacs-lisp-mode)
+               (insert "; this is a comment")
+               (syntax-propertize (point-max))
+               (gptel-cpp-complete--in-string-or-comment-p)))
+
+      (check "in-preprocessor (yes)"
+             (with-temp-buffer
+               (insert "  #include <foo>")
+               (goto-char 10)
+               (gptel-cpp-complete--in-preprocessor-p)))
+      (check "in-preprocessor (no)"
+             (with-temp-buffer
+               (insert "int x;")
+               (not (gptel-cpp-complete--in-preprocessor-p))))
+
+      ;; --- Trigger logic ---
+      (check "should-trigger (default nil = any char)"
+             (with-temp-buffer
+               (c++-mode)
+               (insert "x")
+               (let ((this-command 'self-insert-command)
+                     (gptel-cpp-complete-trigger-characters nil))
+                 (gptel-cpp-complete--should-trigger-p))))
+      (check "should-trigger (restricted, non-trigger)"
+             (with-temp-buffer
+               (c++-mode)
+               (insert "x")
+               (let ((this-command 'self-insert-command)
+                     (gptel-cpp-complete-trigger-characters '(?.)))
+                 (not (gptel-cpp-complete--should-trigger-p)))))
+      (check "should-trigger (restricted, trigger char)"
+             (with-temp-buffer
+               (c++-mode)
+               (insert ".")
+               (let ((this-command 'self-insert-command)
+                     (gptel-cpp-complete-trigger-characters '(?.)))
+                 (gptel-cpp-complete--should-trigger-p))))
+      (check "should-trigger (not self-insert)"
+             (with-temp-buffer
+               (c++-mode)
+               (insert "x")
+               (let ((this-command 'next-line))
+                 (not (gptel-cpp-complete--should-trigger-p)))))
+
+      ;; --- Overlay ---
+      (check "overlay show/active/text"
+             (with-temp-buffer
+               (insert "abc")
+               (gptel-cpp-complete--show-overlay " = 42;")
+               (and (gptel-cpp-complete--overlay-active-p)
+                    (equal " = 42;" (gptel-cpp-complete--overlay-text)))))
+      (check "overlay clear"
+             (with-temp-buffer
+               (insert "abc")
+               (gptel-cpp-complete--show-overlay "xyz")
+               (gptel-cpp-complete--clear-overlay)
+               (not (gptel-cpp-complete--overlay-active-p))))
+      (check "overlay accept"
+             (with-temp-buffer
+               (insert "fo")
+               (gptel-cpp-complete--show-overlay "foo_bar")
+               (gptel-cpp-complete--accept-overlay)
+               (equal "foo_bar" (buffer-substring-no-properties 1 (point)))))
+      (check "overlay accept-word"
+             (with-temp-buffer
+               (insert "x")
+               (gptel-cpp-complete--show-overlay "hello + world")
+               (gptel-cpp-complete-accept-word)
+               (and (equal "xhello" (buffer-substring-no-properties 1 (point)))
+                    (equal " + world" (gptel-cpp-complete--overlay-text)))))
+
+      ;; --- Overlay persistence (post-command) ---
+      (check "overlay persists on non-edit command"
+             (with-temp-buffer
+               (c++-mode)
+               (insert "int x = ")
+               (gptel-cpp-complete--show-overlay "42;")
+               (let ((this-command 'next-line))
+                 (gptel-cpp-complete--post-command))
+               (gptel-cpp-complete--overlay-active-p)))
+      (check "overlay clears on buffer modification"
+             (with-temp-buffer
+               (c++-mode)
+               (insert "int x = ")
+               (gptel-cpp-complete--show-overlay "42;")
+               (delete-char -1)
+               (let ((this-command 'delete-backward-char))
+                 (gptel-cpp-complete--post-command))
+               (not (gptel-cpp-complete--overlay-active-p))))
+
+      ;; --- Sequence / staleness ---
+      (check "cancel bumps seq"
+             (with-temp-buffer
+               (c++-mode)
+               (let ((old gptel-cpp-complete--request-seq))
+                 (gptel-cpp-complete--cancel-request)
+                 (> gptel-cpp-complete--request-seq old))))
+      (check "stale response handler ignored"
+             (with-temp-buffer
+               (c++-mode)
+               (insert "test")
+               (let* ((buf (current-buffer))
+                      (pos (point))
+                      (seq gptel-cpp-complete--request-seq)
+                      (handler (gptel-cpp-complete--make-response-handler buf pos seq)))
+                 (cl-incf gptel-cpp-complete--request-seq)
+                 (funcall handler "stale" nil)
+                 (not (gptel-cpp-complete--overlay-active-p)))))
+      (check "valid response handler shows overlay"
+             (with-temp-buffer
+               (c++-mode)
+               (insert "test")
+               (let* ((buf (current-buffer))
+                      (pos (point))
+                      (seq gptel-cpp-complete--request-seq)
+                      (handler (gptel-cpp-complete--make-response-handler buf pos seq)))
+                 (funcall handler "completion text" nil)
+                 (equal "completion text" (gptel-cpp-complete--overlay-text)))))
+
+      ;; --- Async grep ---
+      (check "async grep with matches"
+             (let ((done nil) (result nil))
+               (with-temp-buffer
+                 (c++-mode)
+                 (gptel-cpp-complete--grep-search-async
+                  (list "\\bmain\\s*\\(")
+                  (current-buffer)
+                  (lambda (r) (setq result r done t)))
+                 (let ((deadline (+ (float-time) 5)))
+                   (while (and (not done) (< (float-time) deadline))
+                     (accept-process-output nil 0.05)
+                     (sit-for 0.01))))
+               (and done (> (length result) 0))))
+      (check "async grep no matches"
+             (let ((done nil) (result nil))
+               (with-temp-buffer
+                 (c++-mode)
+                 (gptel-cpp-complete--grep-search-async
+                  (list "\\bxyzzy_no_exist_999\\b")
+                  (current-buffer)
+                  (lambda (r) (setq result r done t)))
+                 (let ((deadline (+ (float-time) 5)))
+                   (while (and (not done) (< (float-time) deadline))
+                     (accept-process-output nil 0.05)
+                     (sit-for 0.01))))
+               (and done (string-empty-p result))))
+      (check "async grep empty patterns"
+             (let ((done nil) (result nil))
+               (with-temp-buffer
+                 (c++-mode)
+                 (gptel-cpp-complete--grep-search-async
+                  nil
+                  (current-buffer)
+                  (lambda (r) (setq result r done t))))
+               (and done (string-empty-p result))))
+      (check "async grep cancel prevents callback"
+             (let ((done nil))
+               (with-temp-buffer
+                 (c++-mode)
+                 (gptel-cpp-complete--grep-search-async
+                  (list "\\bmain\\s*\\(")
+                  (current-buffer)
+                  (lambda (_r) (setq done t)))
+                 (gptel-cpp-complete--cancel-request)
+                 (accept-process-output nil 1)
+                 (sit-for 0.5))
+               (not done)))
+
+      ;; --- Symbol classification ---
+      (check "classify-symbols"
+             (let* ((syms (list '(:label "foo" :kind 3)
+                                '(:label "x" :kind 6)
+                                '(:label "m" :kind 5)))
+                    (c (gptel-cpp-complete--classify-symbols syms)))
+               (and (= 1 (length (plist-get c :funcs)))
+                    (= 1 (length (plist-get c :vars)))
+                    (= 1 (length (plist-get c :members))))))
+      (check "grep-pattern-for-symbol function"
+             (let ((pat (gptel-cpp-complete--grep-pattern-for-symbol
+                         '(:label "doThing(int)" :kind 3))))
+               (string-match-p "doThing" pat)))
+      (check "grep-pattern-for-symbol field"
+             (let ((pat (gptel-cpp-complete--grep-pattern-for-symbol
+                         '(:label "myField" :kind 5))))
+               (string-match-p "myField" pat)))
+
+      ;; --- Summary ---
+      (princ (format "\n%d passed, %d failed\n" pass fail))
+      (when (> fail 0)
+        (kill-emacs 1)))))
 
 (provide 'gptel-cpp-complete)
 ;;; gptel-cpp-complete.el ends here
