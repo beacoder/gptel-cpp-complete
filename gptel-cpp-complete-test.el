@@ -4,8 +4,7 @@
 
 ;; Author: Huming Chen <chenhuming@gmail.com>
 ;; URL: https://github.com/beacoder/gptel-cpp-complete
-;; Package-Version: 20260713.416
-;; Package-Revision: 650e4077dc35
+;; Version: 0.3.0
 ;; Created: 2025-12-26
 ;; Keywords: convenience
 
