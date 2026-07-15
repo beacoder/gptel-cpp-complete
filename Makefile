@@ -17,15 +17,28 @@ INIT_PACKAGES="(progn \
 all: compile package-lint test clean-elc
 
 package-lint:
-	${EMACS} -Q --eval $(subst PACKAGES,package-lint,${INIT_PACKAGES}) -batch -f package-lint-batch-and-exit gptel-cpp-complete.el gptel-cpp-complete-test.el
+	${EMACS} -Q --eval $(subst PACKAGES,package-lint,${INIT_PACKAGES}) \
+	  -batch \
+	  -f package-lint-batch-and-exit \
+	  gptel-cpp-complete.el \
+	  gptel-cpp-complete-test.el
 
 compile: clean-elc
-	${EMACS} -Q --eval $(subst PACKAGES,${DEPS},${INIT_PACKAGES}) -L . -batch -f batch-byte-compile gptel-cpp-complete.el gptel-cpp-complete-test.el
+	${EMACS} -Q --eval $(subst PACKAGES,${DEPS},${INIT_PACKAGES}) \
+	  -L . \
+	  -batch \
+	  -f batch-byte-compile \
+	  gptel-cpp-complete.el \
+	  gptel-cpp-complete-test.el
 
 test: clean-elc
-	${EMACS} -Q --eval $(subst PACKAGES,${DEPS},${INIT_PACKAGES}) -L . -batch -l gptel-cpp-complete-test --eval '(ert-run-tests-batch "^gptel-cpp-complete-test")'
+	${EMACS} -Q --eval $(subst PACKAGES,${DEPS},${INIT_PACKAGES}) \
+	  -L . \
+	  -batch \
+	  -l gptel-cpp-complete-test \
+	  --eval '(gptel-cpp-complete-run-tests)'
 
 clean-elc:
 	rm -f *.elc
 
-.PHONY:	all compile test clean-elc package-lint
+.PHONY: all compile test clean-elc package-lint
