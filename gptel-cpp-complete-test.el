@@ -208,30 +208,50 @@
 
       ;; --- Async grep ---
       (check "async grep with matches"
-             (let ((done nil) (result nil))
-               (with-temp-buffer
-                 (c++-mode)
-                 (gptel-cpp-complete--grep-search-async
-                  (list "\\bmain\\s*\\(")
-                  (current-buffer)
-                  (lambda (r) (setq result r done t)))
-                 (let ((deadline (+ (float-time) 5)))
-                   (while (and (not done) (< (float-time) deadline))
-                     (accept-process-output nil 0.05)
-                     (sit-for 0.01))))
+             (let ((done nil) (result nil)
+                   (tmp-dir (make-temp-file "gptel-test-" t))
+                   (tmp-file nil))
+               (unwind-protect
+                   (progn
+                     (setq tmp-file (expand-file-name "test.cpp" tmp-dir))
+                     (with-temp-file tmp-file
+                       (insert "int main(int argc, char** argv) {\n  return 0;\n}\n"))
+                     (with-temp-buffer
+                       (c++-mode)
+                       (let ((default-directory (file-name-as-directory tmp-dir)))
+                         (gptel-cpp-complete--grep-search-async
+                          (list "\\bmain\\s*\\(")
+                          (current-buffer)
+                          (lambda (r) (setq result r done t)))
+                         (let ((deadline (+ (float-time) 5)))
+                           (while (and (not done) (< (float-time) deadline))
+                             (accept-process-output nil 0.05)
+                             (sit-for 0.01))))))
+                 (when (file-exists-p tmp-dir)
+                   (delete-directory tmp-dir t)))
                (and done (> (length result) 0))))
       (check "async grep no matches"
-             (let ((done nil) (result nil))
-               (with-temp-buffer
-                 (c++-mode)
-                 (gptel-cpp-complete--grep-search-async
-                  (list "\\bxyzzy_no_exist_999\\b")
-                  (current-buffer)
-                  (lambda (r) (setq result r done t)))
-                 (let ((deadline (+ (float-time) 5)))
-                   (while (and (not done) (< (float-time) deadline))
-                     (accept-process-output nil 0.05)
-                     (sit-for 0.01))))
+             (let ((done nil) (result nil)
+                   (tmp-dir (make-temp-file "gptel-test-" t))
+                   (tmp-file nil))
+               (unwind-protect
+                   (progn
+                     (setq tmp-file (expand-file-name "test.cpp" tmp-dir))
+                     (with-temp-file tmp-file
+                       (insert "int foo() { return 0; }\n"))
+                     (with-temp-buffer
+                       (c++-mode)
+                       (let ((default-directory (file-name-as-directory tmp-dir)))
+                         (gptel-cpp-complete--grep-search-async
+                          (list "\\bxyzzy_no_exist_999\\b")
+                          (current-buffer)
+                          (lambda (r) (setq result r done t)))
+                         (let ((deadline (+ (float-time) 5)))
+                           (while (and (not done) (< (float-time) deadline))
+                             (accept-process-output nil 0.05)
+                             (sit-for 0.01))))))
+                 (when (file-exists-p tmp-dir)
+                   (delete-directory tmp-dir t)))
                (and done (string-empty-p result))))
       (check "async grep empty patterns"
              (let ((done nil) (result nil))
