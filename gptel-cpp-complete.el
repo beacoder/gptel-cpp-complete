@@ -294,35 +294,22 @@ Wraps ARG in single quotes, escaping any embedded single quotes."
   (concat "'" (replace-regexp-in-string "'" "'\\\\''" arg) "'"))
 
 (defun gptel-cpp-complete--kill-grep-buffer (buf)
-  "Kill BUF safely, suppressing process-query prompts.
-Also kills the associated stderr buffer if present."
+  "Kill BUF safely, suppressing process-query prompts."
   (when (buffer-live-p buf)
     (when-let* ((proc (get-buffer-process buf)))
       (set-process-query-on-exit-flag proc nil)
-      ;; Clean up stderr buffer
-      (when-let* ((stderr-buf (process-get proc :stderr-buffer)))
-        (when (buffer-live-p stderr-buf)
-          (kill-buffer stderr-buf)))
       (when (process-live-p proc)
         (delete-process proc)))
     (kill-buffer buf)))
 
 (defun gptel-cpp-complete--start-grep-process (output-buf full-cmd)
   "Start grep process running FULL-CMD with output to OUTPUT-BUF.
-Uses /bin/sh explicitly to avoid shell compatibility issues (e.g. tcsh),
-and discards stderr so diagnostic messages don't pollute results."
-  (let* ((stderr-buf (generate-new-buffer " *gptel-grep-stderr*"))
-         (proc (make-process
-                :name "gptel-grep"
-                :buffer output-buf
-                :command (list "/bin/sh" "-c" full-cmd)
-                :stderr stderr-buf
-                :noquery t)))
-    ;; Also suppress query on stderr pipe process
-    (when-let* ((stderr-proc (get-buffer-process stderr-buf)))
-      (set-process-query-on-exit-flag stderr-proc nil))
-    ;; Store stderr-buf for cleanup
-    (process-put proc :stderr-buffer stderr-buf)
+Uses /bin/sh explicitly to avoid shell compatibility issues (e.g. tcsh).
+Appends `2>/dev/null' to suppress stderr within the sh command itself."
+  (let ((proc (start-process "gptel-grep" output-buf
+                             "/bin/sh" "-c"
+                             (concat full-cmd " 2>/dev/null"))))
+    (set-process-query-on-exit-flag proc nil)
     proc))
 
 (defun gptel-cpp-complete--grep-search-async (patterns owner-buf callback)
@@ -360,14 +347,14 @@ OWNER-BUF is the buffer that owns this request (for process tracking)."
                              (with-current-buffer owner-buf
                                (setq gptel-cpp-complete--grep-process nil)))
                            (when (eq (process-status proc) 'exit)
-                             (funcall callback (or result "")))))))
+                             (funcall callback (or result ""))))))))
                 (error
                  (gptel-cpp-complete--kill-grep-buffer output-buf)
                  (when gptel-cpp-complete-debug
                    (display-warning 'gptel-cpp-complete
                                     (format "Grep async error: %s" err)
                                     :warning))
-                 (funcall callback ""))))))
+                 (funcall callback "")))))
         (let ((output-buf (generate-new-buffer " *gptel-grep*")))
           (condition-case err
               (let ((proc (gptel-cpp-complete--start-grep-process
