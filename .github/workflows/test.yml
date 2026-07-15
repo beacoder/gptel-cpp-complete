@@ -1,24 +1,36 @@
-name: test
-on: [push, pull_request]
+name: CI
+
+on:
+  pull_request:
+  push:
+    paths-ignore:
+    - '**.md'
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
-    - name: Install Emacs
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y emacs-nox
-        emacs --version
-    - name: Install dependencies
-      run: |
-        emacs --batch --eval "
-          (require 'package)
-          (package-initialize)
-          (add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t)
-          (package-refresh-contents)
-          (unless (package-installed-p 'gptel) (package-install 'gptel))
-          (unless (package-installed-p 'eglot) (package-install 'eglot))"
+    - uses: purcell/setup-emacs@master
+      with:
+        version: 29.3
+    - uses: actions/checkout@v4
     - name: Run tests
+      run: make package-lint
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        emacs_version:
+          - 29.3
+          - snapshot
+    steps:
+    - uses: purcell/setup-emacs@master
+      with:
+        version: ${{ matrix.emacs_version }}
+
+    - uses: actions/checkout@v5
+    - name: Run tests
+      run: make compile
+    - name: Run ERT tests
       run: make test
