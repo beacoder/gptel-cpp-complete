@@ -294,7 +294,7 @@ Wraps ARG in single quotes, escaping any embedded single quotes."
   (concat "'" (replace-regexp-in-string "'" "'\\\\''" arg) "'"))
 
 (defun gptel-cpp-complete--kill-grep-buffer (buf)
-  "Kill BUF safely, suppressing process-query prompts."
+  "Kill BUF safely, suppressing process-query prompt."
   (when (buffer-live-p buf)
     (when-let* ((proc (get-buffer-process buf)))
       (set-process-query-on-exit-flag proc nil)
