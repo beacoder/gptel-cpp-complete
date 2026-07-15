@@ -300,7 +300,39 @@ OWNER-BUF is the buffer that owns this request (for process tracking)."
            (full-cmd (when cmd-template
                        (format cmd-template (shell-quote-argument combined)))))
       (if (not full-cmd)
-          (funcall callback "")
+          ;; Fallback to standard grep if rg/ag not available
+          (let ((fallback-cmd (format "grep -E -R -n -e %s ."
+                                    (shell-quote-argument combined))))
+            (let ((output-buf (generate-new-buffer " *gptel-grep*")))
+              (condition-case err
+                  (let ((proc (start-process-shell-command
+                               "gptel-grep" output-buf fallback-cmd)))
+                    (when (buffer-live-p owner-buf)
+                      (with-current-buffer owner-buf
+                        (setq gptel-cpp-complete--grep-process proc)))
+                    (set-process-sentinel
+                     proc
+                     (lambda (proc _event)
+                       (when (memq (process-status proc) '(exit signal))
+                         (let ((result (when (and (buffer-live-p output-buf)
+                                             (eq (process-status proc) 'exit))
+                                         (with-current-buffer output-buf
+                                           (buffer-string)))))
+                           (when (buffer-live-p output-buf)
+                             (kill-buffer output-buf))
+                           (when (buffer-live-p owner-buf)
+                             (with-current-buffer owner-buf
+                               (setq gptel-cpp-complete--grep-process nil)))
+                           (when (eq (process-status proc) 'exit)
+                             (funcall callback (or result "")))))))
+                (error
+                 (when (buffer-live-p output-buf)
+                   (kill-buffer output-buf))
+                 (when gptel-cpp-complete-debug
+                   (display-warning 'gptel-cpp-complete
+                                    (format "Grep async error: %s" err)
+                                    :warning))
+                 (funcall callback ""))))))
         (let ((output-buf (generate-new-buffer " *gptel-grep*")))
           (condition-case err
               (let ((proc (start-process-shell-command
