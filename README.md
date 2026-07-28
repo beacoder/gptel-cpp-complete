@@ -65,15 +65,17 @@ Recommended `eglot` configuration:
 
 Recommended `tree-sitter` configuration:
 ```emacs lisp
- (when (treesit-available-p)
-   (use-package treesit
-     :ensure t
-     :init (setq treesit-extra-load-path
-                 (gptel-cpp-complete--get-treesit-extra-load-path)
-                 major-mode-remap-alist
-                 '((c-mode          . c-ts-mode)
-                   (c++-mode        . c++-ts-mode))
-                 treesit-font-lock-level 4)))
+(when (treesit-available-p)
+  (use-package treesit
+    :ensure t
+    :init (setq treesit-extra-load-path
+                (file-name-directory
+                 (or (locate-library "gptel-cpp-complete")
+                     (error "gptel-cpp-complete not found")))
+                major-mode-remap-alist
+                '((c-mode          . c-ts-mode)
+                  (c++-mode        . c++-ts-mode))
+                treesit-font-lock-level 4)))
 ```
 
 Recommended `gptel` configuration:
