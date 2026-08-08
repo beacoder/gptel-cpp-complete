@@ -113,7 +113,7 @@ Clone the repository and add it to your load path:
 
 ---
 
-## Screenshots
+## Screenshot
 
 ![demo.gif](demo.gif)
 
