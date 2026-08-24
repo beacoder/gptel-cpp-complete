@@ -1,5 +1,6 @@
 # gptel-cpp-complete
 
+[![CI](https://github.com/beacoder/gptel-cpp-complete/actions/workflows/test.yml/badge.svg)](https://github.com/beacoder/gptel-cpp-complete/actions/workflows/test.yml)
 [![MELPA](https://melpa.org/packages/gptel-cpp-complete-badge.svg)](https://melpa.org/#/gptel-cpp-complete)
 
 `gptel-cpp-complete` is an experimental package that provides
